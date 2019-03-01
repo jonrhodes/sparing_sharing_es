@@ -1,0 +1,78 @@
+---
+title: "Simple Sparing Sharing Ecosystem Service Models"
+output: github_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+```
+
+## Introduction
+
+In this document we develop simple models of the effect of land sparing and land sharing on ecosystem service provision.
+
+At the local scale we assume that the relationships between land use intensity and supply and demand follows a power function and can declines with land use intensity for supply, but can decline, increase, or not change with land use intensity for demand.
+
+We then assume that land use intensities at locations have frequency distributions following a beta distribution with the precision parameter controlling the level of sharing (high precision) and sparing (low precision).  
+
+## Setting up Supply and Demand Functions
+
+First we set up the functions that define the relationship between supply and demand and land use intensity
+
+```{r supply_demand_function, echo = TRUE, eval = TRUE}
+supply_demand <- function(Intensity, Direction, Gamma) {
+	# Intensity specific the land-use intensity (values between 0 and 1)
+	# Direction = -1 for negative association
+	# Direction = 0 no association
+	# Direction = 1 for positive association
+	# Gamma specifies the shape
+	ifelse(Direction == 0, return(1), ifelse(Direction == -1, return((1 - Intensity) ^ Gamma),return(Intensity ^ Gamma)))
+}
+```
+Then we set up the function that defines the association between connectivity weight (flow) and the differences between
+intensity values. When the correlation between the weight and differences in intensity values is > 0 then this reflects
+a clustered landscape.  When the correlation between the weight and differences in intensity values is < 0 then this reflects
+a dispersed (fragmented) landscape. When the correlation between the weight and differences in intensity values is 0 then this reflects
+a random landscape.
+
+```{r connectivity_function, echo = TRUE, eval = TRUE}
+connectivity <- function(Diff, Correlation) {
+	# Diff is the absolute difference in intensity values
+	# Correlation specifies the relationship between connectivity weight and the difference in intensity values
+	return(0.5 + Correlation * (Diff - 0.5))
+}
+```  
+Then we set up the functions that calculates the landscape level provision based on the distribution of land use intensities
+
+```{r landscape_provision, echo = TRUE, eval = TRUE}
+f <- function(x, Mean, VarLand, SDirection, SGamma, DDirection, DGamma, Correlation, VarCon) {
+	# x is a 3 x 1 vector of parameters we are integrating over (i.e., intensities for supply, intensities for Demand
+	# and differences in intensity values)
+	# Mean is the mean Intensity
+	# VarLand is variance of land use intensities, so where you are on the sparing/sharing gradient (low = sharing, high = sparing)
+	# SDirection is the direction of the supply/intensity relationship (-1,0,1)
+	# SGamma is the shape of the supply/intensity relationship
+	# DDirection is the direction of the demand/intensity relationship (-1,0,1)
+	# DGamma is the shape of the demand/intensity relationship
+	# Correlation specifies the relationship between connectivity weight and the difference in intensity values
+	# VarCon is the precision for the correlation between relationship between connectivity weight and intensity values   
+
+
+	# Calculate alpha and beta for distribution of sparing/sharing
+	AlphaL <- (((1 - Mean) * Mean ^ 2) - Mean * VarLand) / VarLand
+	BetaL <- ((1 - Mean) * (Mean - (Mean ^ 2) - VarLand)) / VarLand
+
+	# Calculate alpha and beta for distribution of differences in land use intensities
+	AlphaC <- (((1 - x[3]) * x[3] ^ 2) - Mean * VarCon) / VarCon
+	BetaC <- ((1 - x[3]) * (x[3] - (x[3] ^ 2) - VarCon)) / VarCon
+
+	#get supply demand and connectivity weight
+	Supply <- supply_demand(x[1], SDirection, SGamma)
+	Demand <- supply_demand(x[2], DDirection, DGamma)
+	Conn <- connectivity(x[3], Correlation)
+
+	return(Supply * Conn * Demand * pbeta(x[1], AlphaL, BetaL) * pbeta(x[2], AlphaL, BetaL) * pbeta(x[3], AlphaC, BataC))
+}
+
+```
