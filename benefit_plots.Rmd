@@ -6,15 +6,17 @@ output: github_document
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
+library(rmarkdown)
+library(cubature)
 ```
 
 ## Introduction
 
 In this document we develop simple models of the effect of land sparing and land sharing on ecosystem service provision.
 
-At the local scale we assume that the relationships between land use intensity and supply and demand follows a power function and can declines with land use intensity for supply, but can decline, increase, or not change with land use intensity for demand.
+At the local scale we assume that the relationships between land use intensity and supply and demand follow a power function and declines with land use intensity for supply, but can decline, increase, or not change with land use intensity for demand.
 
-We then assume that land use intensities at locations have frequency distributions following a beta distribution with the precision parameter controlling the level of sharing (high precision) and sparing (low precision).  
+We then assume that land use intensities at locations have frequency distributions following a beta distribution with the precision parameter controlling the level of sharing (high precision) and sparing (low precision).
 
 ## Setting up Supply and Demand Functions
 
@@ -31,22 +33,22 @@ supply_demand <- function(Intensity, Direction, Gamma) {
 }
 ```
 Then we set up the function that defines the association between connectivity weight (flow) and the differences between
-intensity values. When the correlation between the weight and differences in intensity values is > 0 then this reflects
-a clustered landscape.  When the correlation between the weight and differences in intensity values is < 0 then this reflects
-a dispersed (fragmented) landscape. When the correlation between the weight and differences in intensity values is 0 then this reflects
+intensity values. When the relationship between the weight and differences in intensity values is > 0 then this reflects
+a clustered landscape.  When the relationship between the weight and differences in intensity values is < 0 then this reflects
+a dispersed (fragmented) landscape. When the relationship between the weight and differences in intensity values is 0 then this reflects
 a random landscape.
 
 ```{r connectivity_function, echo = TRUE, eval = TRUE}
-connectivity <- function(Diff, Correlation) {
+connectivity <- function(Diff, R) {
 	# Diff is the absolute difference in intensity values
-	# Correlation specifies the relationship between connectivity weight and the difference in intensity values
-	return(0.5 + Correlation * (Diff - 0.5))
+	# R specifies direction and size of the relationship between connectivity weight and the difference in intensity values
+	return(exp(R * (Diff - 0.5)) / (1 + exp(R * (Diff - 0.5))))
 }
 ```  
-Then we set up the functions that calculates the landscape level provision based on the distribution of land use intensities
+Then we set up the function for calculating the landscape level provision based on the distribution of land use intensities
 
-```{r landscape_provision, echo = TRUE, eval = TRUE}
-f <- function(x, Mean, VarLand, SDirection, SGamma, DDirection, DGamma, Correlation, VarCon) {
+```{r provision, echo = TRUE, eval = TRUE}
+f <- function(x, Mean, VarLand, SDirection, SGamma, DDirection, DGamma, R, VarCon) {
 	# x is a 3 x 1 vector of parameters we are integrating over (i.e., intensities for supply, intensities for Demand
 	# and differences in intensity values)
 	# Mean is the mean Intensity
@@ -55,24 +57,30 @@ f <- function(x, Mean, VarLand, SDirection, SGamma, DDirection, DGamma, Correlat
 	# SGamma is the shape of the supply/intensity relationship
 	# DDirection is the direction of the demand/intensity relationship (-1,0,1)
 	# DGamma is the shape of the demand/intensity relationship
-	# Correlation specifies the relationship between connectivity weight and the difference in intensity values
-	# VarCon is the precision for the correlation between relationship between connectivity weight and intensity values   
-
+	# R specifies the relationship between connectivity weight and the difference in intensity values
+	# VarCon is the variance of the connectivity weight values given and expected value   
 
 	# Calculate alpha and beta for distribution of sparing/sharing
 	AlphaL <- (((1 - Mean) * Mean ^ 2) - Mean * VarLand) / VarLand
 	BetaL <- ((1 - Mean) * (Mean - (Mean ^ 2) - VarLand)) / VarLand
 
-	# Calculate alpha and beta for distribution of differences in land use intensities
-	AlphaC <- (((1 - x[3]) * x[3] ^ 2) - Mean * VarCon) / VarCon
-	BetaC <- ((1 - x[3]) * (x[3] - (x[3] ^ 2) - VarCon)) / VarCon
+	# Calculate alpha and beta for distribution of the expected connectivity weights
+	AlphaC <- ((1 - connectivity(abs(x[1] - x[2]), R)) * connectivity(abs(x[1] - x[2]), R) ^ 2 - connectivity(abs(x[1] - x[2]), R) * VarCon) / VarCon
+	BetaC <- ((1 - connectivity(abs(x[1] - x[2]), R)) * (connectivity(abs(x[1] - x[2]), R) - connectivity(abs(x[1] - x[2]), R) ^ 2 - VarCon)) / VarCon
 
-	#get supply demand and connectivity weight
+	#get supply, demand, and connectivity weight
 	Supply <- supply_demand(x[1], SDirection, SGamma)
 	Demand <- supply_demand(x[2], DDirection, DGamma)
-	Conn <- connectivity(x[3], Correlation)
+	Conn <- connectivity(x[3], R)
 
-	return(Supply * Conn * Demand * pbeta(x[1], AlphaL, BetaL) * pbeta(x[2], AlphaL, BetaL) * pbeta(x[3], AlphaC, BataC))
+	return(Supply * Conn * Demand * dbeta(x[1], AlphaL, BetaL) * dbeta(x[2], AlphaL, BetaL) * dbeta(Conn, AlphaC, BetaC))
 }
+```
 
+Now we integrate numerically over the distribution of intensities for supply and demand, and the distribution of connectivity values
+to get the expected provision (here we just show an example for now)
+
+```{r test_result, echo = TRUE, eval = TRUE}
+	Test <- adaptIntegrate(f, lowerLimit = c(0, 0, 0), upperLimit = c(1, 1, 1), Mean = 0.5, VarLand = 0.05 , SDirection = -1, SGamma = 1,
+	 										DDirection = 0, DGamma = 1, R = 2, VarCon = 0.05)
 ```
